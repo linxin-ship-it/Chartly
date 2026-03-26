@@ -33,9 +33,9 @@ export default function HomePage() {
         onReset={reset}
       />
 
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex flex-1 flex-col overflow-hidden bg-background">
         <Tabs defaultValue="process" className="flex flex-1 flex-col overflow-hidden">
-          <div className="border-b border-border px-6 pt-3">
+          <div className="border-b border-border px-6 pt-3 bg-card">
             <TabsList>
               <TabsTrigger value="process">分析过程</TabsTrigger>
               <TabsTrigger value="report" className="relative">
