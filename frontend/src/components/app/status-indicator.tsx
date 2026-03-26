@@ -1,71 +1,53 @@
 "use client";
 
-import { AnalysisPhase } from "@/lib/types";
-import { Badge } from "@/components/ui/badge";
-import {
-  Loader2,
-  CheckCircle2,
-  AlertCircle,
-  Brain,
-  Code2,
-  BarChart3,
-  FileText,
-} from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Brain, Code2, FileText, Clock } from "lucide-react";
+import type { AnalysisStatus } from "@/lib/types";
 
 interface StatusIndicatorProps {
-  phase: AnalysisPhase;
+  status: AnalysisStatus;
 }
 
-const PHASE_CONFIG: Record<
-  AnalysisPhase,
-  { label: string; icon: React.ReactNode; variant: "default" | "secondary" | "destructive" | "outline" }
+const STATUS_CONFIG: Record<
+  AnalysisStatus,
+  { label: string; icon: React.ElementType; color: string; animate?: boolean }
 > = {
-  idle: { label: "就绪", icon: null, variant: "outline" },
-  uploading: {
-    label: "上传中…",
-    icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
-    variant: "secondary",
-  },
-  planning: {
-    label: "规划中…",
-    icon: <Brain className="h-3.5 w-3.5 animate-pulse" />,
-    variant: "default",
-  },
-  coding: {
-    label: "执行代码中…",
-    icon: <Code2 className="h-3.5 w-3.5 animate-pulse" />,
-    variant: "default",
-  },
-  analyzing: {
-    label: "分析数据中…",
-    icon: <BarChart3 className="h-3.5 w-3.5 animate-pulse" />,
-    variant: "default",
-  },
-  reporting: {
-    label: "生成报告中…",
-    icon: <FileText className="h-3.5 w-3.5 animate-pulse" />,
-    variant: "default",
-  },
-  done: {
-    label: "分析完成",
-    icon: <CheckCircle2 className="h-3.5 w-3.5" />,
-    variant: "default",
-  },
-  error: {
-    label: "出现错误",
-    icon: <AlertCircle className="h-3.5 w-3.5" />,
-    variant: "destructive",
-  },
+  idle: { label: "就绪", icon: Clock, color: "text-text-muted" },
+  uploading: { label: "上传中", icon: Loader2, color: "text-chartly", animate: true },
+  planning: { label: "规划中", icon: Brain, color: "text-chartly", animate: true },
+  coding: { label: "执行代码中", icon: Code2, color: "text-chartly", animate: true },
+  analyzing: { label: "分析中", icon: Brain, color: "text-chartly", animate: true },
+  reporting: { label: "生成报告中", icon: FileText, color: "text-chartly", animate: true },
+  done: { label: "分析完成", icon: CheckCircle2, color: "text-green-400" },
+  error: { label: "出错了", icon: AlertCircle, color: "text-red-400" },
 };
 
-export function StatusIndicator({ phase }: StatusIndicatorProps) {
-  const config = PHASE_CONFIG[phase];
-  if (phase === "idle") return null;
+export function StatusIndicator({ status }: StatusIndicatorProps) {
+  const config = STATUS_CONFIG[status];
+  const Icon = config.icon;
 
   return (
-    <Badge variant={config.variant} className="gap-1.5 py-1 text-xs">
-      {config.icon}
-      {config.label}
-    </Badge>
+    <div className="flex items-center gap-2.5 rounded-lg bg-[#333333] px-4 py-3">
+      <Icon
+        className={`h-4 w-4 ${config.color} ${config.animate ? "animate-spin" : ""}`}
+        style={config.animate && config.icon !== Loader2 ? { animation: "pulse 2s infinite" } : undefined}
+      />
+      <span className={`text-sm font-medium ${config.color}`}>
+        {config.label}
+      </span>
+      {config.animate && (
+        <span className="ml-auto flex gap-0.5">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="inline-block h-1.5 w-1.5 rounded-full bg-chartly"
+              style={{
+                animation: "pulse 1.4s infinite",
+                animationDelay: `${i * 0.2}s`,
+              }}
+            />
+          ))}
+        </span>
+      )}
+    </div>
   );
 }

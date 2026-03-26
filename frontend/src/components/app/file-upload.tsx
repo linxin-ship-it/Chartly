@@ -3,7 +3,6 @@
 import { useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import { Upload, FileSpreadsheet, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 interface FileUploadProps {
   file: File | null;
@@ -11,7 +10,7 @@ interface FileUploadProps {
   disabled?: boolean;
 }
 
-const ACCEPTED = {
+const ACCEPT = {
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
   "application/vnd.ms-excel": [".xls"],
   "text/csv": [".csv"],
@@ -27,33 +26,28 @@ export function FileUpload({ file, onFileChange, disabled }: FileUploadProps) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: ACCEPTED,
+    accept: ACCEPT,
     maxFiles: 1,
     disabled,
   });
 
   if (file) {
     return (
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/50 px-3 py-2.5">
-        <FileSpreadsheet className="h-5 w-5 shrink-0 text-emerald-600" />
+      <div className="flex items-center gap-3 rounded-lg bg-[#333333] px-4 py-3">
+        <FileSpreadsheet className="h-5 w-5 shrink-0 text-chartly" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{file.name}</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="truncate text-sm font-medium text-white">{file.name}</p>
+          <p className="text-xs text-text-muted">
             {(file.size / 1024).toFixed(1)} KB
           </p>
         </div>
         {!disabled && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 shrink-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              onFileChange(null);
-            }}
+          <button
+            onClick={() => onFileChange(null)}
+            className="rounded-md p-1 text-text-muted transition-colors hover:bg-white/10 hover:text-white"
           >
             <X className="h-4 w-4" />
-          </Button>
+          </button>
         )}
       </div>
     );
@@ -62,20 +56,31 @@ export function FileUpload({ file, onFileChange, disabled }: FileUploadProps) {
   return (
     <div
       {...getRootProps()}
-      className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors ${
+      className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 py-8 transition-colors ${
         isDragActive
-          ? "border-primary bg-primary/5"
-          : "border-muted-foreground/25 hover:border-primary/50"
+          ? "border-chartly bg-chartly/10"
+          : "border-white/15 hover:border-chartly/50 hover:bg-white/5"
       } ${disabled ? "pointer-events-none opacity-50" : ""}`}
     >
       <input {...getInputProps()} />
-      <Upload className="h-8 w-8 text-muted-foreground/60" />
-      <div>
-        <p className="text-sm font-medium">拖拽文件到此处或点击上传</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          支持 .xlsx, .xls, .csv 格式
-        </p>
-      </div>
+      <Upload
+        className={`mb-3 h-8 w-8 ${
+          isDragActive ? "text-chartly" : "text-text-muted"
+        }`}
+      />
+      <p className="text-center text-sm text-text-muted">
+        {isDragActive ? (
+          <span className="text-chartly">松开以上传文件</span>
+        ) : (
+          <>
+            拖拽文件至此，或{" "}
+            <span className="text-chartly">点击上传</span>
+          </>
+        )}
+      </p>
+      <p className="mt-1 text-xs text-text-muted/60">
+        支持 .xlsx, .xls, .csv 格式
+      </p>
     </div>
   );
 }

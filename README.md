@@ -1,66 +1,73 @@
-# Chartly — AI 数据分析报告生成工具
+# Chartly — AI 数据复盘报告生成器
 
-上传 Excel/CSV 数据表格，输入分析需求，AI 自主规划、执行代码、分析数据，最终生成一份包含 ECharts 图表的可视化分析报告。
+上传 Excel/CSV 数据表格 + 分析需求 → AI 自主多轮分析 → 生成带 ECharts 可视化的完整报告。
 
 ## 架构
 
 ```
-frontend/   → Next.js 16 + Shadcn/ui + ECharts + Mermaid
-backend/    → FastAPI + OpenAI SDK + Python 动态执行沙箱
+┌─────────────┐     SSE Stream      ┌──────────────┐     OpenAI API
+│   Next.js   │ ◄──────────────────► │   FastAPI     │ ◄──────────────►  LLM
+│  (Frontend)  │    POST + Stream    │  (Backend)    │   Structured Tags
+└─────────────┘                      └──────────────┘
+                                           │
+                                      exec() sandbox
+                                      (Python code)
 ```
 
-**核心流程：**
-1. 用户上传文件 + 输入分析需求
-2. 后端启动 Agent 循环：LLM 规划 → 生成代码 → 执行 → 检查结果 → 继续/结束
-3. 后端通过 SSE 实时推送结构化事件到前端
-4. 前端根据事件类型路由到不同 UI 组件（思考卡片、代码卡片、报告渲染器等）
+- **前端**：Next.js + shadcn/ui + Zustand + ECharts + Mermaid
+- **后端**：FastAPI + OpenAI SDK + 动态 Python 执行
+- **协议**：结构化标签 `<THINK>/<TOOL>/<REPORT>/<CHART>/<MERMAID>` 流式推送
 
 ## 快速开始
 
-### 1. 后端
+### 后端
 
 ```bash
 cd backend
-python3 -m venv venv
-source venv/bin/activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-
-# 配置 API Key（必须）。默认对接 DeepSeek，也可在 backend/.env 中填写
-export OPENAI_API_KEY="sk-your-key"
-export OPENAI_BASE_URL="https://api.deepseek.com/v1"
-export OPENAI_MODEL="deepseek-chat"
-
+cp .env.example .env  # 填入 OPENAI_API_KEY
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 2. 前端
+### 前端
 
 ```bash
 cd frontend
 npm install
+cp .env.example .env.local  # 配置 NEXT_PUBLIC_API_URL
 npm run dev
 ```
 
-打开 http://localhost:3000
+浏览器打开 http://localhost:3000
 
-### 环境变量
+## 部署
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `OPENAI_API_KEY` | API 密钥（DeepSeek 控制台申请） | (必填) |
-| `OPENAI_BASE_URL` | API 基础地址 | `https://api.deepseek.com/v1` |
-| `OPENAI_MODEL` | 使用的模型 | `deepseek-chat`（可改为 `deepseek-reasoner` 等） |
-| `MAX_AGENT_STEPS` | Agent 最大迭代步数 | `15` |
+### Vercel (前端)
 
-## 协议设计
+1. 将项目推送到 GitHub
+2. 在 Vercel 导入项目，Root Directory 设为 `frontend`
+3. 设置环境变量 `NEXT_PUBLIC_API_URL` 为后端地址
 
-LLM 输出使用 XML 标签协议，后端流式解析并转为 SSE 事件：
+### 后端
 
-| 标签 | 前端路由 | 说明 |
-|------|----------|------|
-| `<THINKING>` | 思考卡片 | 模型推理过程 |
-| `<PLAN>` | 计划卡片 | 执行计划 |
-| `<TOOL_CALL>` | 代码卡片 | JSON 格式的工具调用 |
-| `<TOOL_RESULT>` | 结果卡片 | 代码执行输出 |
-| `<STATUS>` | 状态指示器 | 阶段切换 |
-| `<REPORT>` | 报告渲染器 | 最终 Markdown 报告 |
+可部署到 Railway / Render / Fly.io 等平台：
+
+```bash
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+## 配色方案
+
+| 用途 | 色值 |
+|------|------|
+| Header / 侧边栏背景 | `#222222` |
+| 主页面背景 | `#262626` |
+| 文字 / Icon | `#FFFFFF` |
+| 强调色 / 主按钮 | `#6CC3C5` |
+| 辅助文字 | `#A1A1A1` |
+
+## License
+
+MIT

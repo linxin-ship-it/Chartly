@@ -1,97 +1,113 @@
 """
-Streaming protocol definitions.
+Streaming protocol: structured tags that allow the frontend to route
+different content types to different UI components.
 
-The LLM output is wrapped in explicit tags so the backend parser can route
-different content types to different frontend UI components:
+Tag format in LLM output:
+  <THINK>...</THINK>       — internal reasoning (shown in process view)
+  <TOOL>...</TOOL>         — tool call decision JSON
+  <REPORT>...</REPORT>     — final user-facing markdown report
+  <CHART>...</CHART>       — ECharts option JSON
+  <MERMAID>...</MERMAID>   — Mermaid diagram source
 
-  <THINKING>...</THINKING>     - model's internal reasoning (shown in process view)
-  <TOOL_CALL>...</TOOL_CALL>   - tool invocation decisions (JSON)
-  <TOOL_RESULT>...</TOOL_RESULT> - tool execution results
-  <REPORT>...</REPORT>         - final markdown report for the user
-  <STATUS>...</STATUS>         - phase transitions (planning / coding / reporting)
-  <PLAN>...</PLAN>             - execution plan
-
-Each SSE event sent to the frontend carries:
-  { "type": "<tag>", "content": "<text>" }
+SSE event types sent to frontend:
+  status   — phase change (planning / coding / reporting)
+  think    — model reasoning text
+  tool     — tool call decision
+  code     — code about to be executed
+  result   — tool execution result
+  report   — final report fragment
+  chart    — ECharts config JSON
+  mermaid  — Mermaid diagram source
+  error    — error message
+  done     — stream finished
 """
 
+from __future__ import annotations
 import json
 import re
+from dataclasses import dataclass, field
 from enum import Enum
-from dataclasses import dataclass, asdict
 from typing import Generator
 
 
 class EventType(str, Enum):
-    THINKING = "thinking"
-    TOOL_CALL = "tool_call"
-    TOOL_RESULT = "tool_result"
-    REPORT = "report"
     STATUS = "status"
-    PLAN = "plan"
+    THINK = "think"
+    TOOL = "tool"
+    CODE = "code"
+    RESULT = "result"
+    REPORT = "report"
+    CHART = "chart"
+    MERMAID = "mermaid"
     ERROR = "error"
     DONE = "done"
 
 
 @dataclass
-class StreamEvent:
-    type: EventType
-    content: str
+class SSEEvent:
+    event: EventType
+    data: str
 
-    def to_sse(self) -> str:
-        payload = json.dumps(asdict(self), ensure_ascii=False)
+    def encode(self) -> str:
+        payload = json.dumps({"type": self.event.value, "content": self.data}, ensure_ascii=False)
         return f"data: {payload}\n\n"
 
 
 TAG_PATTERN = re.compile(
-    r"<(THINKING|TOOL_CALL|TOOL_RESULT|REPORT|STATUS|PLAN)>(.*?)</\1>",
+    r"<(THINK|TOOL|REPORT|CHART|MERMAID)>(.*?)</\1>",
     re.DOTALL,
 )
 
 TAG_TO_EVENT: dict[str, EventType] = {
-    "THINKING": EventType.THINKING,
-    "TOOL_CALL": EventType.TOOL_CALL,
-    "TOOL_RESULT": EventType.TOOL_RESULT,
+    "THINK": EventType.THINK,
+    "TOOL": EventType.TOOL,
     "REPORT": EventType.REPORT,
-    "STATUS": EventType.STATUS,
-    "PLAN": EventType.PLAN,
+    "CHART": EventType.CHART,
+    "MERMAID": EventType.MERMAID,
 }
 
 
-def parse_tagged_output(text: str) -> list[StreamEvent]:
-    """Parse a complete LLM response into structured events."""
-    events: list[StreamEvent] = []
+def parse_tags(text: str) -> list[SSEEvent]:
+    """Extract all tagged sections from a complete LLM response."""
+    events: list[SSEEvent] = []
     for match in TAG_PATTERN.finditer(text):
-        tag = match.group(1)
+        tag_name = match.group(1)
         content = match.group(2).strip()
-        event_type = TAG_TO_EVENT.get(tag, EventType.THINKING)
-        events.append(StreamEvent(type=event_type, content=content))
+        event_type = TAG_TO_EVENT.get(tag_name)
+        if event_type:
+            events.append(SSEEvent(event=event_type, data=content))
     return events
 
 
-class StreamingProtocolParser:
+@dataclass
+class StreamParser:
     """
-    Incremental parser that processes streaming LLM text chunks.
-    Yields structured events as soon as closing tags are detected.
+    Incremental parser that buffers streaming text and emits SSE events
+    as soon as complete tagged sections are found.
     """
+    buffer: str = ""
+    _open_tags: list[str] = field(default_factory=list)
 
-    def __init__(self) -> None:
-        self._buffer = ""
-
-    def feed(self, chunk: str) -> Generator[StreamEvent, None, None]:
-        self._buffer += chunk
+    def feed(self, chunk: str) -> list[SSEEvent]:
+        self.buffer += chunk
+        events: list[SSEEvent] = []
         while True:
-            match = TAG_PATTERN.search(self._buffer)
-            if not match:
+            found = TAG_PATTERN.search(self.buffer)
+            if not found:
                 break
-            tag = match.group(1)
-            content = match.group(2).strip()
-            event_type = TAG_TO_EVENT.get(tag, EventType.THINKING)
-            yield StreamEvent(type=event_type, content=content)
-            self._buffer = self._buffer[match.end():]
+            tag_name = found.group(1)
+            content = found.group(2).strip()
+            event_type = TAG_TO_EVENT.get(tag_name)
+            if event_type:
+                events.append(SSEEvent(event=event_type, data=content))
+            self.buffer = self.buffer[found.end():]
+        return events
 
-    def flush(self) -> Generator[StreamEvent, None, None]:
-        remaining = self._buffer.strip()
+    def flush(self) -> list[SSEEvent]:
+        """Return any remaining untagged text as a think event."""
+        events: list[SSEEvent] = []
+        remaining = self.buffer.strip()
         if remaining:
-            yield StreamEvent(type=EventType.THINKING, content=remaining)
-        self._buffer = ""
+            events.append(SSEEvent(event=EventType.THINK, data=remaining))
+        self.buffer = ""
+        return events

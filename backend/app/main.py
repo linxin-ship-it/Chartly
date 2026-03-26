@@ -1,7 +1,8 @@
 """
-FastAPI application — file upload + SSE streaming endpoint.
+FastAPI application: file upload + SSE streaming endpoint.
 """
 
+from __future__ import annotations
 import os
 import uuid
 import logging
@@ -12,12 +13,11 @@ from fastapi.responses import StreamingResponse
 
 from .config import UPLOAD_DIR
 from .agent import run_agent
-from .protocol import StreamEvent, EventType
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+logger = logging.getLogger("chartly.api")
 
-app = FastAPI(title="Chartly — AI Data Analysis Agent")
+app = FastAPI(title="Chartly API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,7 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 @app.post("/api/analyze")
@@ -35,27 +35,35 @@ async def analyze(
     file: UploadFile = File(...),
     goal: str = Form(...),
 ):
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(400, f"Unsupported file type: {ext}")
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="未提供文件")
 
-    file_id = uuid.uuid4().hex[:12]
-    save_name = f"{file_id}{ext}"
-    save_path = os.path.join(UPLOAD_DIR, save_name)
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if ext not in ("xlsx", "xls", "csv"):
+        raise HTTPException(status_code=400, detail="仅支持 .xlsx, .xls, .csv 文件")
+
+    session_id = uuid.uuid4().hex[:12]
+    safe_name = f"{session_id}_{file.filename}"
+    filepath = os.path.join(UPLOAD_DIR, safe_name)
 
     content = await file.read()
-    with open(save_path, "wb") as f:
+    with open(filepath, "wb") as f:
         f.write(content)
 
-    logger.info(f"Uploaded file saved: {save_path} ({len(content)} bytes)")
+    logger.info("File uploaded: %s (%d bytes), goal: %s", safe_name, len(content), goal[:100])
 
     async def event_stream():
         try:
-            async for event in run_agent(user_goal=goal, file_path=save_path):
-                yield event.to_sse()
+            async for event in run_agent(
+                user_goal=goal,
+                filename=file.filename,
+                filepath=filepath,
+            ):
+                yield event
         except Exception as e:
-            logger.error(f"Agent error: {e}")
-            yield StreamEvent(type=EventType.ERROR, content=str(e)).to_sse()
+            logger.exception("Stream error")
+            import json
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_stream(),
@@ -70,4 +78,4 @@ async def analyze(
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "chartly"}

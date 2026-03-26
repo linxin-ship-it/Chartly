@@ -1,64 +1,61 @@
 "use client";
 
-import { useMemo } from "react";
-import ReactEChartsCore from "echarts-for-react/lib/core";
-import * as echarts from "echarts/core";
-import { BarChart, LineChart, PieChart, ScatterChart, RadarChart } from "echarts/charts";
-import {
-  TitleComponent,
-  TooltipComponent,
-  GridComponent,
-  LegendComponent,
-  DatasetComponent,
-  ToolboxComponent,
-} from "echarts/components";
-import { CanvasRenderer } from "echarts/renderers";
-
-echarts.use([
-  BarChart,
-  LineChart,
-  PieChart,
-  ScatterChart,
-  RadarChart,
-  TitleComponent,
-  TooltipComponent,
-  GridComponent,
-  LegendComponent,
-  DatasetComponent,
-  ToolboxComponent,
-  CanvasRenderer,
-]);
+import { useEffect, useRef } from "react";
+import type { ChartConfig } from "@/lib/types";
 
 interface EChartsBlockProps {
-  optionJson: string;
+  config: ChartConfig;
 }
 
-export function EChartsBlock({ optionJson }: EChartsBlockProps) {
-  const option = useMemo(() => {
-    try {
-      return JSON.parse(optionJson);
-    } catch {
-      return null;
-    }
-  }, [optionJson]);
+export function EChartsBlock({ config }: EChartsBlockProps) {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const instanceRef = useRef<ReturnType<typeof import("echarts")["init"]> | null>(null);
 
-  if (!option) {
-    return (
-      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-        图表配置解析失败
-      </div>
-    );
-  }
+  useEffect(() => {
+    let disposed = false;
+
+    const initChart = async () => {
+      const echarts = await import("echarts");
+      if (disposed || !chartRef.current) return;
+
+      if (instanceRef.current) {
+        instanceRef.current.dispose();
+      }
+
+      const chart = echarts.init(chartRef.current, "dark");
+      instanceRef.current = chart;
+
+      const option = {
+        backgroundColor: "transparent",
+        ...config.option,
+      };
+
+      chart.setOption(option);
+
+      const resizeObserver = new ResizeObserver(() => {
+        chart.resize();
+      });
+      resizeObserver.observe(chartRef.current);
+
+      return () => {
+        resizeObserver.disconnect();
+      };
+    };
+
+    initChart();
+
+    return () => {
+      disposed = true;
+      instanceRef.current?.dispose();
+    };
+  }, [config]);
 
   return (
-    <div className="my-4 overflow-hidden rounded-lg border bg-card p-2">
-      <ReactEChartsCore
-        echarts={echarts}
-        option={option}
-        style={{ height: 400, width: "100%" }}
-        notMerge
-        lazyUpdate
-      />
+    <div className="my-4 overflow-hidden rounded-lg border border-white/10 bg-[#262626] p-4">
+      {config.title && (
+        <h4 className="mb-3 text-sm font-medium text-white">{config.title}</h4>
+      )}
+      <div ref={chartRef} className="h-[350px] w-full" />
     </div>
   );
 }

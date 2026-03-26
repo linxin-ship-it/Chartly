@@ -1,40 +1,47 @@
 """
-Sandboxed Python code executor.
-Runs user-generated code in a restricted namespace with captured stdout/stderr.
+Python code execution sandbox using dynamic exec().
+Captures stdout and handles errors gracefully.
+A shared namespace persists across calls within a single analysis session
+so that variables (e.g. loaded DataFrames) are available across steps.
 """
 
+from __future__ import annotations
 import io
 import sys
-import traceback
 import textwrap
+import traceback
 from typing import Any
 
 
-class CodeSandbox:
-    """Maintains a persistent namespace across multiple code executions within one session."""
+def create_namespace(extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    ns: dict[str, Any] = {"__builtins__": __builtins__}
+    if extra:
+        ns.update(extra)
+    return ns
 
-    def __init__(self) -> None:
-        self._namespace: dict[str, Any] = {}
 
-    def run(self, code: str) -> dict:
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        stdout_buf = io.StringIO()
-        stderr_buf = io.StringIO()
-        sys.stdout = stdout_buf
-        sys.stderr = stderr_buf
+def run_python_code(code: str, namespace: dict[str, Any] | None = None) -> dict[str, Any]:
+    if namespace is None:
+        namespace = create_namespace()
 
-        error = None
-        try:
-            exec(textwrap.dedent(code), self._namespace)
-        except Exception:
-            error = traceback.format_exc()
-        finally:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    sys.stdout = stdout_buf
+    sys.stderr = stderr_buf
 
-        return {
-            "stdout": stdout_buf.getvalue(),
-            "stderr": stderr_buf.getvalue(),
-            "error": error,
-        }
+    error = None
+    try:
+        exec(textwrap.dedent(code), namespace)
+    except Exception:
+        error = traceback.format_exc()
+    finally:
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+
+    return {
+        "stdout": stdout_buf.getvalue(),
+        "stderr": stderr_buf.getvalue(),
+        "error": error,
+    }

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Chartly — AI Data Analysis",
-  description: "Upload data, get visual analysis reports powered by AI",
+  title: "Chartly — 数据复盘报告生成器",
+  description: "上传数据表格，AI 自动生成可视化分析报告",
 };
 
 export default function RootLayout({
@@ -24,8 +24,8 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="zh"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
+      lang="zh-CN"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

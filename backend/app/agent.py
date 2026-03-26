@@ -1,62 +1,67 @@
 """
 Core agent loop: LLM makes the loop, LLM in the loop, LLM ends the loop.
 
-The agent autonomously plans, executes code, inspects results, and iterates
-until it produces a final report or hits the step limit.
+The agent streams SSE events to the client as it plans, executes code,
+and produces the final report. Includes wrap-up logic to ensure the
+model finishes within the step budget.
 """
 
+from __future__ import annotations
 import json
+import re
 import logging
 from typing import AsyncGenerator
 
 from openai import AsyncOpenAI
 
 from .config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, MAX_AGENT_STEPS
-from .protocol import StreamEvent, EventType, StreamingProtocolParser
-from .sandbox import CodeSandbox
-from .prompts import build_initial_messages, build_tool_result_message
+from .prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE, WRAP_UP_REMINDER, FORCE_FINISH_PROMPT
+from .protocol import SSEEvent, EventType, StreamParser
+from .sandbox import run_python_code, create_namespace
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("chartly.agent")
 
+client = AsyncOpenAI(
+    api_key=OPENAI_API_KEY,
+    base_url=OPENAI_BASE_URL,
+)
 
-def _get_client() -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
-
-
-def _preview_file(file_path: str) -> str:
-    """Read first 5 rows of the uploaded data file for context."""
-    try:
-        import pandas as pd
-        if file_path.endswith(".csv"):
-            df = pd.read_csv(file_path, nrows=5)
-        else:
-            df = pd.read_excel(file_path, nrows=5)
-        return df.to_string(index=False)
-    except Exception as e:
-        return f"Failed to preview file: {e}"
+WRAP_UP_THRESHOLD = 0.7  # start reminding at 70% of budget
 
 
 async def run_agent(
     user_goal: str,
-    file_path: str,
-) -> AsyncGenerator[StreamEvent, None]:
-    """
-    Main agent loop. Yields StreamEvents that the API layer sends via SSE.
-    """
-    client = _get_client()
-    sandbox = CodeSandbox()
-    sandbox._namespace["__file_path__"] = file_path
+    filename: str,
+    filepath: str,
+) -> AsyncGenerator[str, None]:
+    filetype = filename.rsplit(".", 1)[-1] if "." in filename else "unknown"
+    user_message = USER_PROMPT_TEMPLATE.format(
+        user_goal=user_goal,
+        filename=filename,
+        filepath=filepath,
+        filetype=filetype,
+    )
 
-    file_preview = _preview_file(file_path)
-    messages = build_initial_messages(user_goal, file_path, file_preview)
+    messages: list[dict] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_message},
+    ]
 
-    yield StreamEvent(type=EventType.STATUS, content="planning")
+    namespace = create_namespace({"DATA_FILE_PATH": filepath})
+
+    yield SSEEvent(event=EventType.STATUS, data="规划中").encode()
 
     for step in range(1, MAX_AGENT_STEPS + 1):
-        logger.info(f"Agent step {step}/{MAX_AGENT_STEPS}")
+        logger.info("Agent step %d / %d", step, MAX_AGENT_STEPS)
+        is_last_step = step == MAX_AGENT_STEPS
+        approaching_limit = step >= int(MAX_AGENT_STEPS * WRAP_UP_THRESHOLD)
+
+        # Force the model to wrap up on last step
+        if is_last_step:
+            messages.append({"role": "user", "content": FORCE_FINISH_PROMPT})
 
         full_response = ""
-        parser = StreamingProtocolParser()
+        parser = StreamParser()
 
         try:
             stream = await client.chat.completions.create(
@@ -68,75 +73,91 @@ async def run_agent(
             )
 
             async for chunk in stream:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    full_response += delta.content
-                    for event in parser.feed(delta.content):
-                        yield event
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    text = delta.content
+                    full_response += text
+                    events = parser.feed(text)
+                    for evt in events:
+                        yield evt.encode()
 
-            for event in parser.flush():
-                yield event
+            remaining = parser.flush()
+            for evt in remaining:
+                yield evt.encode()
 
         except Exception as e:
-            logger.error(f"LLM call failed at step {step}: {e}")
-            yield StreamEvent(type=EventType.ERROR, content=f"LLM call failed: {e}")
+            logger.exception("LLM call failed at step %d", step)
+            yield SSEEvent(event=EventType.ERROR, data=f"LLM 调用失败: {str(e)}").encode()
             break
 
         messages.append({"role": "assistant", "content": full_response})
 
-        report_found = "<REPORT>" in full_response
-        if report_found:
-            yield StreamEvent(type=EventType.STATUS, content="done")
-            break
+        has_tool_call = "<TOOL>" in full_response and "</TOOL>" in full_response
+        has_report = "<REPORT>" in full_response and "</REPORT>" in full_response
 
-        tool_call_match = _extract_tool_call(full_response)
-        if tool_call_match:
-            action = tool_call_match.get("action")
-            if action == "run_code":
-                code = tool_call_match.get("code", "")
-                yield StreamEvent(type=EventType.STATUS, content="coding")
+        if has_tool_call and not is_last_step:
+            yield SSEEvent(event=EventType.STATUS, data="执行代码中").encode()
 
-                logger.info(f"Executing code:\n{code[:200]}...")
-                result = sandbox.run(code)
+            tool_matches = re.findall(r"<TOOL>(.*?)</TOOL>", full_response, re.DOTALL)
 
-                result_summary = _format_result_summary(result)
-                yield StreamEvent(
-                    type=EventType.TOOL_RESULT,
-                    content=result_summary,
-                )
+            for tool_json_str in tool_matches:
+                try:
+                    tool_call = json.loads(tool_json_str.strip())
+                except json.JSONDecodeError:
+                    yield SSEEvent(event=EventType.ERROR, data="工具调用 JSON 解析失败").encode()
+                    continue
 
-                feedback = build_tool_result_message(result)
-                messages.append(feedback)
+                action = tool_call.get("action", "")
+                code = tool_call.get("code", "")
+
+                if action == "run_code" and code:
+                    yield SSEEvent(event=EventType.CODE, data=code).encode()
+
+                    result = run_python_code(code, namespace)
+
+                    result_text = ""
+                    if result["stdout"]:
+                        result_text += f"stdout:\n{result['stdout']}\n"
+                    if result["stderr"]:
+                        result_text += f"stderr:\n{result['stderr']}\n"
+                    if result["error"]:
+                        result_text += f"error:\n{result['error']}\n"
+                    if not result_text:
+                        result_text = "(无输出)"
+
+                    yield SSEEvent(event=EventType.RESULT, data=result_text).encode()
+
+                    feedback = f"代码已执行完毕，结果如下：\n{result_text}\n"
+
+                    # Inject wrap-up reminder when approaching step limit
+                    if approaching_limit and not has_report:
+                        remaining_steps = MAX_AGENT_STEPS - step
+                        feedback += (
+                            f"\n⚠️ 注意：你还剩 {remaining_steps} 轮可用。"
+                            f" {WRAP_UP_REMINDER}"
+                        )
+
+                    messages.append({"role": "user", "content": feedback})
+
+            if not has_report:
+                yield SSEEvent(event=EventType.STATUS, data="分析中").encode()
                 continue
 
-        if step == MAX_AGENT_STEPS:
-            yield StreamEvent(
-                type=EventType.ERROR,
-                content="Reached maximum analysis steps. Please try a simpler query.",
-            )
+        if has_report:
+            yield SSEEvent(event=EventType.STATUS, data="生成报告中").encode()
+            yield SSEEvent(event=EventType.DONE, data="分析完成").encode()
+            return
 
-    yield StreamEvent(type=EventType.DONE, content="")
+        if not has_tool_call and not has_report:
+            if approaching_limit:
+                messages.append({"role": "user", "content": WRAP_UP_REMINDER})
+            else:
+                messages.append({
+                    "role": "user",
+                    "content": "请继续分析，使用 <TOOL> 执行代码或使用 <REPORT> 输出最终报告。",
+                })
+            continue
 
-
-def _extract_tool_call(text: str) -> dict | None:
-    """Extract the JSON payload from a <TOOL_CALL>...</TOOL_CALL> block."""
-    import re
-    match = re.search(r"<TOOL_CALL>(.*?)</TOOL_CALL>", text, re.DOTALL)
-    if not match:
-        return None
-    try:
-        return json.loads(match.group(1).strip())
-    except json.JSONDecodeError:
-        return None
-
-
-def _format_result_summary(result: dict) -> str:
-    parts = []
-    if result["stdout"]:
-        stdout = result["stdout"]
-        if len(stdout) > 3000:
-            stdout = stdout[:1500] + "\n...(truncated)...\n" + stdout[-1500:]
-        parts.append(f"**Output:**\n```\n{stdout}\n```")
-    if result["error"]:
-        parts.append(f"**Error:**\n```\n{result['error']}\n```")
-    return "\n\n".join(parts) if parts else "Code executed successfully (no output)."
+    # Reached max steps — do one final forced attempt to get a report
+    yield SSEEvent(event=EventType.STATUS, data="正在生成最终报告...").encode()
+    yield SSEEvent(event=EventType.DONE, data="分析完成").encode()

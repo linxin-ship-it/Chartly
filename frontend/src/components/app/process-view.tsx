@@ -1,133 +1,89 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { ProcessStep } from "@/lib/types";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Brain,
   Code2,
   Terminal,
-  ClipboardList,
   AlertCircle,
-  Sparkles,
-  CheckCircle2,
+  BarChart3,
+  GitBranch,
+  FileText,
+  ChevronRight,
 } from "lucide-react";
+import { useAppStore } from "@/lib/store";
+import type { ProcessItem, EventType } from "@/lib/types";
 
-interface ProcessViewProps {
-  steps: ProcessStep[];
-}
-
-const TYPE_CONFIG: Record<
-  string,
-  { label: string; icon: React.ReactNode; className: string }
+const ITEM_STYLES: Record<
+  EventType,
+  { icon: React.ElementType; accent: string; bg: string; label: string }
 > = {
-  thinking: {
-    label: "思考",
-    icon: <Brain className="h-4 w-4" />,
-    className: "border-l-blue-500 bg-blue-50/50 dark:bg-blue-950/20",
-  },
-  plan: {
-    label: "计划",
-    icon: <ClipboardList className="h-4 w-4" />,
-    className: "border-l-violet-500 bg-violet-50/50 dark:bg-violet-950/20",
-  },
-  tool_call: {
-    label: "代码",
-    icon: <Code2 className="h-4 w-4" />,
-    className: "border-l-amber-500 bg-amber-50/50 dark:bg-amber-950/20",
-  },
-  tool_result: {
-    label: "结果",
-    icon: <Terminal className="h-4 w-4" />,
-    className: "border-l-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20",
-  },
-  status: {
-    label: "状态",
-    icon: <Sparkles className="h-4 w-4" />,
-    className: "border-l-gray-400 bg-gray-50/50 dark:bg-gray-950/20",
-  },
-  report: {
-    label: "报告",
-    icon: <CheckCircle2 className="h-4 w-4" />,
-    className: "border-l-green-500 bg-green-50/50 dark:bg-green-950/20",
-  },
-  error: {
-    label: "错误",
-    icon: <AlertCircle className="h-4 w-4" />,
-    className: "border-l-red-500 bg-red-50/50 dark:bg-red-950/20",
-  },
-  done: {
-    label: "完成",
-    icon: <CheckCircle2 className="h-4 w-4" />,
-    className: "border-l-green-500 bg-green-50/50 dark:bg-green-950/20",
-  },
+  status: { icon: ChevronRight, accent: "text-chartly", bg: "bg-chartly/10", label: "状态" },
+  think: { icon: Brain, accent: "text-purple-400", bg: "bg-purple-400/10", label: "思考" },
+  tool: { icon: Code2, accent: "text-blue-400", bg: "bg-blue-400/10", label: "工具" },
+  code: { icon: Code2, accent: "text-amber-400", bg: "bg-amber-400/10", label: "代码" },
+  result: { icon: Terminal, accent: "text-green-400", bg: "bg-green-400/10", label: "结果" },
+  report: { icon: FileText, accent: "text-chartly", bg: "bg-chartly/10", label: "报告" },
+  chart: { icon: BarChart3, accent: "text-chartly", bg: "bg-chartly/10", label: "图表" },
+  mermaid: { icon: GitBranch, accent: "text-cyan-400", bg: "bg-cyan-400/10", label: "流程图" },
+  error: { icon: AlertCircle, accent: "text-red-400", bg: "bg-red-400/10", label: "错误" },
+  done: { icon: ChevronRight, accent: "text-green-400", bg: "bg-green-400/10", label: "完成" },
 };
 
-function StepCard({ step }: { step: ProcessStep }) {
-  const config = TYPE_CONFIG[step.type] || TYPE_CONFIG.thinking;
-
-  if (step.type === "done" || (step.type === "status" && !step.content)) return null;
-  if (step.type === "report") return null;
-
-  let displayContent = step.content;
-  if (step.type === "tool_call") {
-    try {
-      const parsed = JSON.parse(step.content);
-      displayContent = parsed.code || step.content;
-    } catch {
-      displayContent = step.content;
-    }
-  }
+function ProcessCard({ item }: { item: ProcessItem }) {
+  const style = ITEM_STYLES[item.type] || ITEM_STYLES.think;
+  const Icon = style.icon;
+  const isCode = item.type === "code";
+  const isResult = item.type === "result";
 
   return (
-    <Card className={`border-l-4 ${config.className} shadow-none`}>
-      <CardContent className="px-4 py-3">
-        <div className="mb-2 flex items-center gap-2">
-          {config.icon}
-          <Badge variant="outline" className="text-xs">
-            {config.label}
-          </Badge>
-          <span className="ml-auto text-xs text-muted-foreground">
-            {new Date(step.timestamp).toLocaleTimeString()}
-          </span>
-        </div>
-        <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/80">
-          {displayContent}
+    <div className={`rounded-lg ${style.bg} border border-white/5 p-4`}>
+      <div className="mb-2 flex items-center gap-2">
+        <Icon className={`h-4 w-4 ${style.accent}`} />
+        <span className={`text-xs font-medium uppercase tracking-wider ${style.accent}`}>
+          {style.label}
+        </span>
+        <span className="ml-auto text-xs text-white/40">
+          {new Date(item.timestamp).toLocaleTimeString("zh-CN")}
+        </span>
+      </div>
+      {(isCode || isResult) ? (
+        <pre className="overflow-x-auto rounded-md bg-[#1a1a1a] p-3 text-xs leading-relaxed text-white/80 font-mono">
+          <code>{item.content}</code>
         </pre>
-      </CardContent>
-    </Card>
+      ) : (
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-white/80">
+          {item.content}
+        </p>
+      )}
+    </div>
   );
 }
 
-export function ProcessView({ steps }: ProcessViewProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+export function ProcessView() {
+  const processItems = useAppStore((s) => s.processItems);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [steps.length]);
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [processItems]);
 
-  const visibleSteps = steps.filter(
-    (s) => s.type !== "done" && s.type !== "report" && s.content,
-  );
-
-  if (visibleSteps.length === 0) {
+  if (processItems.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        <p className="text-sm">上传文件并输入分析需求后，分析过程将在此显示</p>
+      <div className="flex h-full flex-col items-center justify-center bg-[#262626] text-white/50">
+        <Brain className="mb-4 h-12 w-12 opacity-30" />
+        <p className="text-sm">上传数据并开始分析后，AI 的思考过程将在这里展示</p>
       </div>
     );
   }
 
   return (
-    <ScrollArea className="h-full">
-      <div className="space-y-3 p-4">
-        {visibleSteps.map((step) => (
-          <StepCard key={step.id} step={step} />
-        ))}
-        <div ref={bottomRef} />
-      </div>
-    </ScrollArea>
+    <div ref={scrollRef} className="flex h-full flex-col gap-3 overflow-y-auto bg-[#262626] p-5">
+      {processItems.map((item) => (
+        <ProcessCard key={item.id} item={item} />
+      ))}
+    </div>
   );
 }

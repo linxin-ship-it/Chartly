@@ -1,105 +1,73 @@
 "use client";
 
-import { AnalysisPhase } from "@/lib/types";
+import { useState } from "react";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import { FileUpload } from "./file-upload";
 import { StatusIndicator } from "./status-indicator";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
-import { Play, Square, RotateCcw, BarChart3 } from "lucide-react";
+import { useAppStore } from "@/lib/store";
+import { startAnalysis } from "@/lib/api";
+import { Play } from "lucide-react";
 
-interface SidebarProps {
-  file: File | null;
-  goal: string;
-  phase: AnalysisPhase;
-  onFileChange: (file: File | null) => void;
-  onGoalChange: (goal: string) => void;
-  onStart: () => void;
-  onStop: () => void;
-  onReset: () => void;
-}
+export function Sidebar() {
+  const [file, setFile] = useState<File | null>(null);
+  const [goal, setGoal] = useState("");
+  const status = useAppStore((s) => s.status);
+  const isRunning = !["idle", "done", "error"].includes(status);
 
-const RUNNING_PHASES: AnalysisPhase[] = [
-  "uploading",
-  "planning",
-  "coding",
-  "analyzing",
-  "reporting",
-];
-
-export function Sidebar({
-  file,
-  goal,
-  phase,
-  onFileChange,
-  onGoalChange,
-  onStart,
-  onStop,
-  onReset,
-}: SidebarProps) {
-  const isRunning = RUNNING_PHASES.includes(phase);
-  const canStart = !!file && goal.trim().length > 0 && !isRunning;
+  const handleSubmit = async () => {
+    if (!file || !goal.trim()) return;
+    try {
+      await startAnalysis(file, goal.trim());
+    } catch (err) {
+      useAppStore.getState().setStatus("error");
+      useAppStore.getState().addProcessItem({
+        id: `error-${Date.now()}`,
+        type: "error",
+        content: `分析失败: ${err instanceof Error ? err.message : String(err)}`,
+        timestamp: Date.now(),
+      });
+    }
+  };
 
   return (
-    <aside className="flex h-full w-80 shrink-0 flex-col border-r border-border bg-card">
-      <div className="flex items-center gap-2.5 border-b border-border px-5 py-4">
-        <BarChart3 className="h-6 w-6 text-primary" />
-        <h1 className="text-lg font-semibold tracking-tight">Chartly</h1>
+    <aside className="flex h-full w-[320px] shrink-0 flex-col gap-5 border-r border-white/10 bg-[#222222] p-5">
+      <h2 className="text-base font-semibold text-white">分析任务</h2>
+
+      <div className="flex flex-col gap-4">
+        <div>
+          <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-text-muted">
+            数据文件
+          </label>
+          <FileUpload file={file} onFileChange={setFile} disabled={isRunning} />
+        </div>
+
+        <div>
+          <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-text-muted">
+            分析需求
+          </label>
+          <Textarea
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            placeholder={"例：对销售数据进行描述性统计，分析各区域/产品的销售趋势，找出关键增长点和风险点，并给出建议。"}
+            rows={5}
+            disabled={isRunning}
+            className="resize-none border-white/15 bg-[#333333] text-white placeholder:text-text-muted/50 focus:border-chartly focus:ring-chartly/30"
+          />
+        </div>
+
+        <Button
+          onClick={handleSubmit}
+          disabled={!file || !goal.trim() || isRunning}
+          className="w-full gap-2 bg-chartly text-white font-semibold hover:bg-chartly/90 border-0 disabled:opacity-40"
+        >
+          <Play className="h-4 w-4" />
+          {isRunning ? "分析中..." : "开始分析"}
+        </Button>
       </div>
 
-      <div className="flex flex-1 flex-col gap-5 overflow-y-auto p-5">
-        <div>
-          <label className="mb-2 block text-sm font-medium">数据文件</label>
-          <FileUpload
-            file={file}
-            onFileChange={onFileChange}
-            disabled={isRunning}
-          />
-        </div>
-
-        <div>
-          <label className="mb-2 block text-sm font-medium">分析需求</label>
-          <Textarea
-            placeholder="例如：分析各季度销售趋势，找出销量最高的产品类别，并给出优化建议"
-            value={goal}
-            onChange={(e) => onGoalChange(e.target.value)}
-            disabled={isRunning}
-            className="min-h-[120px] resize-none"
-          />
-        </div>
-
-        <Separator />
-
-        <StatusIndicator phase={phase} />
-
-        <div className="flex flex-col gap-2">
-          {!isRunning ? (
-            <Button onClick={onStart} disabled={!canStart} className="w-full gap-2">
-              <Play className="h-4 w-4" />
-              开始分析
-            </Button>
-          ) : (
-            <Button
-              onClick={onStop}
-              variant="destructive"
-              className="w-full gap-2"
-            >
-              <Square className="h-4 w-4" />
-              停止分析
-            </Button>
-          )}
-
-          {(phase === "done" || phase === "error") && (
-            <Button
-              onClick={onReset}
-              variant="outline"
-              className="w-full gap-2"
-            >
-              <RotateCcw className="h-4 w-4" />
-              重新开始
-            </Button>
-          )}
-        </div>
+      <div className="mt-auto">
+        <StatusIndicator status={status} />
       </div>
     </aside>
   );
