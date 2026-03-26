@@ -5,20 +5,28 @@
 ## 架构
 
 ```
-┌─────────────┐     SSE Stream      ┌──────────────┐     OpenAI API
-│   Next.js   │ ◄──────────────────► │   FastAPI     │ ◄──────────────►  LLM
-│  (Frontend)  │    POST + Stream    │  (Backend)    │   Structured Tags
-└─────────────┘                      └──────────────┘
-                                           │
-                                      exec() sandbox
-                                      (Python code)
+┌─────────────┐                    ┌──────────────────┐
+│   Next.js   │  ── /api/analyze → │ Python Serverless │ ── OpenAI API → DeepSeek
+│  (Frontend)  │    SSE Stream     │  (Agent + exec)   │
+└─────────────┘                    └──────────────────┘
 ```
 
-- **前端**：Next.js + shadcn/ui + Zustand + ECharts + Mermaid
-- **后端**：FastAPI + OpenAI SDK + 动态 Python 执行
-- **协议**：结构化标签 `<THINK>/<TOOL>/<REPORT>/<CHART>/<MERMAID>` 流式推送
+**Vercel 一键部署**：前端 Next.js + 后端 Python Serverless Function 整包在 Vercel。
 
-## 快速开始
+## 快速部署到 Vercel
+
+1. Fork / Push 到 GitHub
+2. 在 [Vercel](https://vercel.com) 导入项目
+3. **Root Directory** 设为 `frontend`
+4. 设置环境变量：
+   - `OPENAI_API_KEY` — DeepSeek API Key
+   - `OPENAI_BASE_URL` — `https://api.deepseek.com`
+   - `OPENAI_MODEL` — `deepseek-chat`
+5. 部署完成
+
+> Vercel Pro 套餐支持 Serverless Function 最长 5 分钟，Hobby 套餐约 1 分钟。复杂分析建议使用 Pro。
+
+## 本地开发
 
 ### 后端
 
@@ -35,28 +43,11 @@ uvicorn app.main:app --reload --port 8000
 ```bash
 cd frontend
 npm install
-cp .env.example .env.local  # 配置 NEXT_PUBLIC_API_URL
+cp .env.example .env.local
 npm run dev
 ```
 
 浏览器打开 http://localhost:3000
-
-## 部署
-
-### Vercel (前端)
-
-1. 将项目推送到 GitHub
-2. 在 Vercel 导入项目，Root Directory 设为 `frontend`
-3. 设置环境变量 `NEXT_PUBLIC_API_URL` 为后端地址
-
-### 后端
-
-可部署到 Railway / Render / Fly.io 等平台：
-
-```bash
-cd backend
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
 
 ## 配色方案
 

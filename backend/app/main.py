@@ -1,13 +1,15 @@
 """
 FastAPI application: file upload + SSE streaming endpoint.
+Supports both multipart form upload and JSON (base64) for Vercel compatibility.
 """
 
 from __future__ import annotations
+import base64
 import os
 import uuid
 import logging
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -31,32 +33,48 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 @app.post("/api/analyze")
-async def analyze(
-    file: UploadFile = File(...),
-    goal: str = Form(...),
-):
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="未提供文件")
+async def analyze(request: Request):
+    content_type = request.headers.get("content-type", "")
 
-    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if "application/json" in content_type:
+        data = await request.json()
+        goal = data.get("goal", "")
+        filename = data.get("filename", "data.xlsx")
+        file_b64 = data.get("file", "")
+
+        if not goal or not file_b64:
+            raise HTTPException(status_code=400, detail="Missing goal or file")
+
+        file_content = base64.b64decode(file_b64)
+    else:
+        form = await request.form()
+        goal = form.get("goal", "")
+        file_field = form.get("file")
+
+        if not goal or not file_field:
+            raise HTTPException(status_code=400, detail="Missing goal or file")
+
+        filename = file_field.filename or "data.xlsx"
+        file_content = await file_field.read()
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext not in ("xlsx", "xls", "csv"):
         raise HTTPException(status_code=400, detail="仅支持 .xlsx, .xls, .csv 文件")
 
     session_id = uuid.uuid4().hex[:12]
-    safe_name = f"{session_id}_{file.filename}"
+    safe_name = f"{session_id}_{filename}"
     filepath = os.path.join(UPLOAD_DIR, safe_name)
 
-    content = await file.read()
     with open(filepath, "wb") as f:
-        f.write(content)
+        f.write(file_content)
 
-    logger.info("File uploaded: %s (%d bytes), goal: %s", safe_name, len(content), goal[:100])
+    logger.info("File uploaded: %s (%d bytes), goal: %s", safe_name, len(file_content), goal[:100])
 
     async def event_stream():
         try:
             async for event in run_agent(
                 user_goal=goal,
-                filename=file.filename,
+                filename=filename,
                 filepath=filepath,
             ):
                 yield event

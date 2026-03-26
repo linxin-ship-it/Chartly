@@ -1,8 +1,6 @@
 import type { StreamEvent, ChartConfig } from "./types";
 import { useAppStore } from "./store";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
 let itemCounter = 0;
 
 function statusToPhase(statusText: string): "planning" | "coding" | "analyzing" | "reporting" | "done" {
@@ -14,6 +12,19 @@ function statusToPhase(statusText: string): "planning" | "coding" | "analyzing" 
   return "analyzing";
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(",")[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function startAnalysis(file: File, goal: string): Promise<void> {
   const store = useAppStore.getState();
   store.reset();
@@ -22,13 +33,16 @@ export async function startAnalysis(file: File, goal: string): Promise<void> {
   store.setActiveTab("process");
   itemCounter = 0;
 
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("goal", goal);
+  const fileBase64 = await fileToBase64(file);
 
-  const response = await fetch(`${API_BASE}/api/analyze`, {
+  const response = await fetch("/api/analyze", {
     method: "POST",
-    body: formData,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file: fileBase64,
+      filename: file.name,
+      goal,
+    }),
   });
 
   if (!response.ok) {
